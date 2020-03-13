@@ -37,6 +37,17 @@ import json
 import os
 import platform
 import sys
+import socket
+
+try:
+    from socket import MSG_PEEK, MSG_DONTWAIT
+    import select
+    from select import EPOLLIN, EPOLLHUP
+    EPOLL = True
+except ImportError:
+    EPOLL = False
+
+
 try:
     import urllib.parse as urlparse
 except ImportError:
@@ -210,10 +221,18 @@ class BaseProxy(object):
         else:
             self.__conn = httplib.HTTPConnection(self.__url.hostname, port=port,
                                                  timeout=timeout)
+        self.ep = None
 
     def _call(self, service_name, *args):
         self.__id_count += 1
 
+        if EPOLL and self.ep:
+            for (fd, ev) in self.ep.poll(0):
+                if ev & EPOLLHUP or (ev & EPOLLIN and \
+                        b'' == self.__conn.sock.recv(1, MSG_DONTWAIT|MSG_PEEK)):
+                    self.__conn.close()
+                    self.ep.close()
+                    self.ep = None
         postdata = json.dumps({'version': '1.1',
                                'method': service_name,
                                'params': args,
@@ -229,6 +248,9 @@ class BaseProxy(object):
             headers['Authorization'] = self.__auth_header
 
         self.__conn.request('POST', self.__url.path, postdata, headers)
+        if EPOLL and not self.ep:
+            self.ep = select.epoll()
+            self.ep.register(self.__conn.sock, select.EPOLLIN|select.EPOLLHUP)
 
         response = self._get_response()
         err = response.get('error')
@@ -256,7 +278,17 @@ class BaseProxy(object):
         if self.__auth_header is not None:
             headers['Authorization'] = self.__auth_header
 
+        if EPOLL and self.ep:
+            for (fd, ev) in self.ep.poll(0):
+                if ev & EPOLLHUP or (ev & EPOLLIN and \
+                        b'' == self.__conn.sock.recv(1, MSG_DONTWAIT|MSG_PEEK)):
+                    self.__conn.close()
+                    self.ep.close()
+                    self.ep = None
         self.__conn.request('POST', self.__url.path, postdata, headers)
+        if EPOLL and not self.ep:
+            self.ep = select.epoll()
+            self.ep.register(self.__conn.sock, select.EPOLLIN|select.EPOLLHUP)
         return self._get_response()
 
     def _get_response(self):
