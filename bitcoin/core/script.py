@@ -857,6 +857,7 @@ SIGHASH_ALL = 1
 SIGHASH_NONE = 2
 SIGHASH_SINGLE = 3
 SIGHASH_ANYONECANPAY = 0x80
+SIGHASH_NOINPUT = 0x40
 
 def FindAndDelete(script, sig):
     """Consensus critical, see FindAndDelete() in Satoshi codebase"""
@@ -983,6 +984,7 @@ def RawSignatureHash(script, txTo, inIdx, hashtype):
 
 SIGVERSION_BASE = 0
 SIGVERSION_WITNESS_V0 = 1
+SIGVERSION_WITNESS_V1 = 2
 
 def SignatureHash(script, txTo, inIdx, hashtype, amount=None, sigversion=SIGVERSION_BASE):
     """Calculate a signature hash
@@ -992,22 +994,31 @@ def SignatureHash(script, txTo, inIdx, hashtype, amount=None, sigversion=SIGVERS
     wallet use.
     """
 
-    if sigversion == SIGVERSION_WITNESS_V0:
+    if sigversion == SIGVERSION_WITNESS_V0 or SIGVERSION_WITNESS_V1:
         hashPrevouts = b'\x00'*32
         hashSequence = b'\x00'*32
         hashOutputs  = b'\x00'*32
+        noinput = (sigversion == SIGVERSION_WITNESS_V1 and hashType & SIGHASH_NOINPUT)
+        prevout = b'\x00'*36      # NOINPUT null prevout
+        noinput_script = b'\x00'  # NOINPUT null script
 
-        if not (hashtype & SIGHASH_ANYONECANPAY):
+        if (not (hashtype & SIGHASH_ANYONECANPAY)) and not noinput:
             serialize_prevouts = bytes()
             for i in txTo.vin:
                 serialize_prevouts += i.prevout.serialize()
             hashPrevouts = bitcoin.core.Hash(serialize_prevouts)
 
-        if (not (hashtype & SIGHASH_ANYONECANPAY) and (hashtype & 0x1f) != SIGHASH_SINGLE and (hashtype & 0x1f) != SIGHASH_NONE):
+        if (not (hashtype & SIGHASH_ANYONECANPAY) and (hashtype & 0x1f) !=
+                SIGHASH_SINGLE and (hashtype & 0x1f) != SIGHASH_NONE and not noinput):
             serialize_sequence = bytes()
             for i in txTo.vin:
                 serialize_sequence += struct.pack("<I", i.nSequence)
             hashSequence = bitcoin.core.Hash(serialize_sequence)
+
+        if not noinput:
+            prevout = txTo.vin[inIdx].prevout
+        else:
+            script = noinput_script
 
         if ((hashtype & 0x1f) != SIGHASH_SINGLE and (hashtype & 0x1f) != SIGHASH_NONE):
             serialize_outputs = bytes()
@@ -1022,7 +1033,10 @@ def SignatureHash(script, txTo, inIdx, hashtype, amount=None, sigversion=SIGVERS
         f.write(struct.pack("<i", txTo.nVersion))
         f.write(hashPrevouts)
         f.write(hashSequence)
-        txTo.vin[inIdx].prevout.stream_serialize(f)
+        if not noinput:
+            txTo.vin[inIdx].prevout.stream_serialize(f)
+        else:
+            f.write(prevout)
         BytesSerializer.stream_serialize(script, f)
         f.write(struct.pack("<q", amount))
         f.write(struct.pack("<I", txTo.vin[inIdx].nSequence))
@@ -1179,6 +1193,7 @@ __all__ = (
         'SIGHASH_NONE',
         'SIGHASH_SINGLE',
         'SIGHASH_ANYONECANPAY',
+        'SIGHASH_NOINPUT',
         'FindAndDelete',
         'RawSignatureHash',
         'SignatureHash',
