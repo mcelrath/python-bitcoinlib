@@ -998,7 +998,7 @@ def SignatureHash(script, txTo, inIdx, hashtype, amount=None, sigversion=SIGVERS
         hashPrevouts = b'\x00'*32
         hashSequence = b'\x00'*32
         hashOutputs  = b'\x00'*32
-        noinput = (sigversion == SIGVERSION_WITNESS_V1 and hashType & SIGHASH_NOINPUT)
+        noinput = (sigversion == SIGVERSION_WITNESS_V1 and hashtype & SIGHASH_NOINPUT)
         prevout = b'\x00'*36      # NOINPUT null prevout
         noinput_script = b'\x00'  # NOINPUT null script
 
@@ -1201,4 +1201,5 @@ __all__ = (
 
         'SIGVERSION_BASE',
         'SIGVERSION_WITNESS_V0',
+        'SIGVERSION_WITNESS_V1',
 )
